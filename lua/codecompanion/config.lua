@@ -19,6 +19,7 @@ local defaults = {
       gemini = "gemini",
       githubmodels = "githubmodels",
       huggingface = "huggingface",
+      nanogpt = "nanogpt",
       novita = "novita",
       mistral = "mistral",
       ollama = "ollama",
