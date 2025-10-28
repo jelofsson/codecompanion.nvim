@@ -77,7 +77,10 @@ local function get_models(self, opts)
 
   -- Filter for Claude models only
   for _, model in ipairs(json.data) do
-    if model.id and (model.id:lower():match("claude") or model.id:lower():match("anthropic")) then
+if model.id and (
+  (model.id:lower():match("claude") and model.id:lower():match("haiku")) or
+  (model.id:lower():match("claude") and model.id:lower():match("sonnet"))
+) then
       table.insert(_cached_models, model.id)
     end
   end
