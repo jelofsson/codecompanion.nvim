@@ -119,8 +119,6 @@ return {
   headers = {
     ["content-type"] = "application/json",
     ["Authorization"] = "Bearer ${api_key}",
-    ["anthropic-version"] = "2023-06-01",
-    ["anthropic-beta"] = "prompt-caching-2024-07-31",
   },
   temp = {},
   handlers = {
@@ -128,7 +126,7 @@ return {
     ---@return boolean
     setup = function(self)
        log:debug("[NanoGPT] Setup started")
-       
+
       if self.opts and self.opts.stream then
         self.parameters.stream = true
       end
@@ -139,7 +137,7 @@ return {
         model = model(self)
       end
        log:debug("[NanoGPT] Using model: %s", model)
-       
+
       local model_opts = self.schema.model.choices
       if type(model_opts) == "function" then
         model_opts = model_opts(self)
@@ -161,19 +159,6 @@ return {
         self.temp.extended_thinking = false
         self.temp.extended_output = false
         self.temp.thinking_budget = nil
-      end
-
-      -- Add the extended output header if enabled
-      if self.temp.extended_output then
-        self.headers["anthropic-beta"] = (self.headers["anthropic-beta"] .. "," or "") .. "output-128k-2025-02-19"
-         log:debug("[NanoGPT] Extended output enabled")
-      end
-
-      -- Ref: https://docs.anthropic.com/en/docs/build-with-claude/tool-use/token-efficient-tool-use
-      if current_model_opts and current_model_opts.has_token_efficient_tools then
-        self.headers["anthropic-beta"] = (self.headers["anthropic-beta"] .. "," or "")
-          .. "token-efficient-tools-2025-02-19"
-         log:debug("[NanoGPT] Token efficient tools enabled")
       end
 
        log:debug("[NanoGPT] Setup completed successfully")
