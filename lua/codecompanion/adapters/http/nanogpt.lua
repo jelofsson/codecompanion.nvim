@@ -490,6 +490,18 @@ return {
         if type(data) == "string" and string.sub(data, 1, 6) == "event:" then
           return
         end
+
+          -- Check for error responses in streaming mode
+          if type(data) == "string" and data:match('"type":"error"') then
+            local ok, json = pcall(vim.json.decode, data:match('^{.-}'))
+            if ok and json.type == "error" and json.error then
+              log:error("NanoGPT API Error: %s (code: %s)", json.error.message or "Unknown error", json.error.code or "unknown")
+              return {
+                status = "error",
+                output = { error = json.error.message or "API request failed" }
+              }
+            end
+          end
       end
 
       if data and data ~= "" then
