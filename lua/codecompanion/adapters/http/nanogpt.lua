@@ -127,6 +127,8 @@ return {
     ---@param self CodeCompanion.HTTPAdapter
     ---@return boolean
     setup = function(self)
+       log:debug("[NanoGPT] Setup started")
+       
       if self.opts and self.opts.stream then
         self.parameters.stream = true
       end
@@ -136,12 +138,15 @@ return {
       if type(model) == "function" then
         model = model(self)
       end
+       log:debug("[NanoGPT] Using model: %s", model)
+       
       local model_opts = self.schema.model.choices
       if type(model_opts) == "function" then
         model_opts = model_opts(self)
       end
       if model_opts and model_opts[model] and model_opts[model].opts then
         self.opts = vim.tbl_deep_extend("force", self.opts, model_opts[model].opts)
+         log:debug("[NanoGPT] Model options: %s", model_opts[model].opts)
         if not model_opts[model].opts.has_vision then
           self.opts.vision = false
         end
@@ -161,14 +166,17 @@ return {
       -- Add the extended output header if enabled
       if self.temp.extended_output then
         self.headers["anthropic-beta"] = (self.headers["anthropic-beta"] .. "," or "") .. "output-128k-2025-02-19"
+         log:debug("[NanoGPT] Extended output enabled")
       end
 
       -- Ref: https://docs.anthropic.com/en/docs/build-with-claude/tool-use/token-efficient-tool-use
       if current_model_opts and current_model_opts.has_token_efficient_tools then
         self.headers["anthropic-beta"] = (self.headers["anthropic-beta"] .. "," or "")
           .. "token-efficient-tools-2025-02-19"
+         log:debug("[NanoGPT] Token efficient tools enabled")
       end
 
+       log:debug("[NanoGPT] Setup completed successfully")
       return true
     end,
 
