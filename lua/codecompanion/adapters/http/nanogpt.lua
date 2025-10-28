@@ -576,21 +576,16 @@ return {
             elseif json.type == "content_block_stop" then
               -- Content block finished, no action needed for streaming
               log:trace("Content block stopped")
+              -- Finalize any partial tool inputs
               if tools then
-                -- Finalize any partial tool inputs
                 for _, tool in ipairs(tools) do
                   if tool.input and tool.input ~= "" then
                     -- Tool input is complete, no further action needed
                     log:trace("Tool input finalized for %s: %s", tool.name, tool.input)
                   end
                 end
-                -- Return success when content block stops and we have tools
-                -- This prevents hanging when tool execution completes
-                return {
-                  status = "success",
-                  output = output,
-                }
               end
+              -- Don't return here - wait for message_stop
             elseif json.type == "message_delta" then
               -- Message delta with usage information, continue processing
               log:trace("Message delta received")
@@ -728,6 +723,13 @@ return {
           if type(model) ~= "string" then
             goto continue
           end
+            
+            -- Filter out thinking models
+            local model_lower = model:lower()
+            if model_lower:match("thinking") or model_lower:match("reasoner") then
+              goto continue
+            end
+            
           -- Add basic options for all models
           choices[model] = {
             formatted_name = model:gsub("%-", " "):gsub("(%w)(%w*)", function(first, rest)
@@ -735,12 +737,6 @@ return {
             end),
             opts = { has_vision = true },
           }
-
-          -- Add reasoning capabilities only for models explicitly named with "thinking"
-          local model_lower = model:lower()
-          if model_lower:match("thinking") or model_lower:match("reasoner") then
-            choices[model].opts.can_reason = true
-          end
 
           -- Add token efficient tools for 3.7 sonnet (more flexible pattern matching)
           if model_lower:match("3.*7.*sonnet") then
