@@ -130,6 +130,10 @@ return {
         self.parameters.stream_options = { include_usage = true }
       end
 
+        -- Reset NanoGPT streaming hygiene state at the start of each request
+        self.temp = self.temp or {}
+        self.temp.nanogpt = { seen_non_whitespace = false }
+
       return true
     end,
 
@@ -145,9 +149,43 @@ return {
     form_tools = function(self, tools)
       return openai.handlers.form_tools(self, tools)
     end,
-    chat_output = function(self, data, tools)
-      return openai.handlers.chat_output(self, data, tools)
-    end,
+      chat_output = function(self, data, tools)
+        -- Delegate to OpenAI-compatible handler first
+        local result = openai.handlers.chat_output(self, data, tools)
+        if not result or result.status ~= "success" or not result.output then
+          return result
+        end
+
+        local content = result.output.content
+        if type(content) == "string" then
+          -- Adapter-local streaming hygiene: suppress whitespace/newline-only chunks
+          -- and trim leading whitespace from the very first substantive chunk.
+          -- Some OpenAI-compatible backends emit many blank tokens before content.
+          self.temp = self.temp or {}
+          self.temp.nanogpt = self.temp.nanogpt or { seen_non_whitespace = false }
+
+          -- Drop any chunk that's entirely whitespace (spaces, tabs, newlines)
+          if content:match("^%s*$") then
+            return nil
+          end
+
+        -- If this is the first substantive chunk, trim leading whitespace/newlines
+        if not self.temp.nanogpt.seen_non_whitespace then
+          content = content:gsub("^%s+", "")
+          result.output.content = content
+          -- If after trimming there's nothing left, drop this chunk too
+          if content == "" then
+            return nil
+          end
+        end
+
+          if content:match("%S") then
+            self.temp.nanogpt.seen_non_whitespace = true
+          end
+        end
+
+        return result
+      end,
     inline_output = function(self, data, context)
       return openai.handlers.inline_output(self, data, context)
     end,
