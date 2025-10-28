@@ -124,7 +124,10 @@ return {
     ---@param self CodeCompanion.HTTPAdapter
     ---@return boolean
     setup = function(self)
-      if self.opts and self.opts.stream then
+      -- Disable streaming for inline editing
+      if self.strategy == "inline" then
+        self.parameters.stream = false
+      elseif self.opts and self.opts.stream then
         self.parameters.stream = true
       end
 
@@ -251,6 +254,8 @@ return {
             -- Remove the message if vision is not supported
             return nil
           end
+        else
+          log:trace("Empty or nil data received")
         end
 
         -- 4. Remove disallowed keys
@@ -473,6 +478,10 @@ return {
           end
         end
       end
+        
+        -- Fallback return for cases where no JSON was processed
+        log:trace("No JSON processed, returning nil")
+        return nil
     end,
 
     ---Output the data from the API ready for insertion into the chat buffer
@@ -485,6 +494,7 @@ return {
 
       if self.opts.stream then
         if type(data) == "string" and string.sub(data, 1, 6) == "event:" then
+            log:trace("Skipping event line: %s", data)
           return
         end
       end
@@ -496,9 +506,13 @@ return {
           data = data.body
         end
 
+          log:trace("Processing data: %s", vim.inspect(data))
+
         local ok, json = pcall(vim.json.decode, data, { luanil = { object = true } })
 
         if ok then
+            log:trace("JSON type: %s", json.type)
+
           if json.type == "message_start" then
             output.role = json.message.role
             output.content = ""
@@ -520,59 +534,104 @@ return {
             if json.delta.type == "thinking_delta" then
               output.reasoning = output.reasoning or {}
               output.reasoning.content = json.delta.thinking
+                log:trace("Processing thinking delta: %s", json.delta.thinking)
             elseif json.delta.type == "signature_delta" then
               output.reasoning = output.reasoning or {}
               output.reasoning.signature = json.delta.signature
+                log:trace("Processing signature delta: %s", json.delta.signature)
             else
               output.content = json.delta.text
+                log:trace("Processing text delta: %s", json.delta.text)
               if json.delta.partial_json and tools then
                 for i, tool in ipairs(tools) do
                   if tool._index == json.index then
                     tools[i].input = tools[i].input .. json.delta.partial_json
+                      log:trace("Updating tool input for index %s: %s", json.index, json.delta.partial_json)
                     break
                   end
                 end
               end
             end
           elseif json.type == "message" then
-            output.role = json.role
+              -- Non-streaming response
+              output.role = json.role
 
-            for i, content in ipairs(json.content) do
-              if content.type == "text" then
-                output.content = (output.content or "") .. content.text
-              elseif content.type == "thinking" then
-                output.reasoning = output.reasoning and output.reasoning or {}
-                output.reasoning.content = content.text
-              elseif content.type == "tool_use" and tools then
-                table.insert(tools, {
-                  _index = i,
-                  id = content.id,
-                  name = content.name,
-                  -- Encode the input as JSON to match the partial JSON which comes encoded
-                  input = vim.json.encode(content.input),
-                })
+              for i, content in ipairs(json.content) do
+                if content.type == "text" then
+                  output.content = (output.content or "") .. content.text
+                elseif content.type == "thinking" then
+                  output.reasoning = output.reasoning and output.reasoning or {}
+                  output.reasoning.content = content.thinking
+                  output.reasoning._data = { signature = content.signature }
+                elseif content.type == "tool_use" and tools then
+                  table.insert(tools, {
+                    _index = i,
+                    id = content.id,
+                    name = content.name,
+                    -- Encode the input as JSON to match the partial JSON which comes encoded
+                    input = vim.json.encode(content.input),
+                  })
+                end
               end
+            elseif json.type == "content_block_stop" then
+              -- Content block finished, no action needed for streaming
+              log:trace("Content block stopped")
+              if tools then
+                -- Finalize any partial tool inputs
+                for _, tool in ipairs(tools) do
+                  if tool.input and tool.input ~= "" then
+                    -- Tool input is complete, no further action needed
+                    log:trace("Tool input finalized for %s: %s", tool.name, tool.input)
+                  end
+                end
+                -- Return success when content block stops and we have tools
+                -- This prevents hanging when tool execution completes
+                return {
+                  status = "success",
+                  output = output,
+                }
+              end
+            elseif json.type == "message_delta" then
+              -- Message delta with usage information, continue processing
+              log:trace("Message delta received")
+            elseif json.type == "message_stop" then
+              -- Message finished, signal completion
+              log:trace("Message stopped - signaling completion")
+              return {
+                status = "success", 
+                output = output,
+              }
             end
-          end
 
-          return {
-            status = "success",
-            output = output,
-          }
+            -- Only return success if we have actual content or reasoning
+            if output.content or output.reasoning then
+              log:trace("Returning success with output: %s", vim.inspect(output))
+              return {
+                status = "success",
+                output = output,
+              }
+            end
+          else
+            log:error("Failed to decode JSON: %s", data)
+            return {
+              status = "error",
+              output = { content = "JSON decode error" },
+            }
+          end
+        else
+          log:trace("Empty or nil data received")
         end
-      end
-    end,
+        
+        -- Return nil to continue processing more data
+        return nil
+      end,
 
     ---Output the data from the API ready for inlining into the current buffer
     ---@param self CodeCompanion.HTTPAdapter
-    ---@param data table The streamed JSON data from the API, also formatted by the format_data handler
+    ---@param data table The JSON data from the API, also formatted by the format_data handler
     ---@param context? table Useful context about the buffer to inline to
     ---@return table|nil
     inline_output = function(self, data, context)
-      if self.opts.stream then
-        return log:error("Inline output is not supported for non-streaming models")
-      end
-
       if data and data ~= "" then
         local ok, json = pcall(vim.json.decode, data.body, { luanil = { object = true } })
 
