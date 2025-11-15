@@ -169,5 +169,17 @@ return {
         return get_models(self)
       end,
     },
+    ---@type CodeCompanion.Schema
+    max_tokens = {
+      order = 5,
+      mapping = "parameters",
+      type = "number",
+      optional = true,
+      default = 4096, -- Conservative default for all models
+      desc = "The maximum number of tokens to generate before stopping. This parameter only specifies the absolute maximum number of tokens to generate. Different models have different maximum values for this parameter.",
+      validate = function(n)
+        return n > 0 and n <= 128000, "Must be between 0 and 128000"
+      end,
+    },
   },
 }
