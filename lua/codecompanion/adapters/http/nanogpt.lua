@@ -192,8 +192,227 @@ return {
     form_parameters = function(self, params, messages)
       return openai.handlers.form_parameters(self, params, messages)
     end,
+    ---Set the format of the role and content for the messages that are sent from the chat buffer to the LLM
+    ---@param self CodeCompanion.HTTPAdapter
+    ---@param messages table Format is: { { role = "user", content = "Your prompt here" } }
+    ---@return table
     form_messages = function(self, messages)
-      return openai.handlers.form_messages(self, messages)
+      local has_tools = false
+
+      -- 1. Extract and format system messages
+      local system = vim
+        .iter(messages)
+        :filter(function(msg)
+          return msg.role == "system"
+        end)
+        :map(function(msg)
+          return {
+            type = "text",
+            text = msg.content,
+            cache_control = nil, -- To be set later if needed
+          }
+        end)
+        :totable()
+      system = next(system) and system or nil
+
+      -- 2. Remove any system messages from the regular messages
+      messages = vim
+        .iter(messages)
+        :filter(function(msg)
+          return msg.role ~= "system"
+        end)
+        :totable()
+
+      -- 3–7. Clean up, role‐convert, and handle tool calls in one pass
+      messages = vim.tbl_map(function(m)
+        -- 3. Account for any images
+        if m._meta and m._meta.tag == "image" and m.context and m.context.mimetype then
+          if self.opts and self.opts.vision then
+            m.content = {
+              {
+                type = "image",
+                source = {
+                  type = "base64",
+                  media_type = m.context.mimetype,
+                  data = m.content,
+                },
+              },
+            }
+          else
+            -- Remove the message if vision is not supported
+            return nil
+          end
+        end
+
+        -- 4. Remove disallowed keys
+        m = adapter_utils.filter_out_messages({
+          message = m,
+          allowed_words = {
+            "content",
+            "role",
+            "reasoning",
+            "tools",
+          },
+        })
+
+        -- 5. Turn string content into { { type = "text", text } } and add in the reasoning
+        if m.role == self.roles.user or m.role == self.roles.llm then
+          -- Anthropic doesn't allow the user to submit an empty prompt. But
+          -- this can be necessary to prompt the LLM to analyze any tool
+          -- calls and their output
+          if m.role == self.roles.user and m.content == "" then
+            m.content = "<prompt></prompt>"
+          end
+
+          if type(m.content) == "string" then
+            m.content = {
+              { type = "text", text = m.content },
+            }
+          end
+        end
+
+        if m.tools and m.tools.calls and vim.tbl_count(m.tools.calls) > 0 then
+          has_tools = true
+        end
+
+        -- 6. Treat 'tool' role as user and convert tool results to Anthropic format
+        if m.role == "tool" then
+          m.role = self.roles.user
+          -- Convert tool result from CodeCompanion format to Anthropic format
+          if m.tools and m.tools.type == "tool_result" then
+            -- Handle content that might already be in Anthropic's format
+            if type(m.content) == "table" and m.content.type == "tool_result" then
+              -- Already in Anthropic format, keep it as-is but ensure it's in an array
+              m.content = { m.content }
+            else
+              -- Convert from CodeCompanion format to Anthropic format
+              m.content = {
+                {
+                  type = "tool_result",
+                  tool_use_id = m.tools.call_id,
+                  content = m.content,
+                  is_error = m.tools.is_error or false,
+                },
+              }
+            end
+            m.tools = nil
+          end
+        end
+
+        -- 7. Convert any LLM tool_calls into content blocks
+        if has_tools and m.role == self.roles.llm and m.tools and m.tools.calls then
+          m.content = m.content or {}
+          for _, call in ipairs(m.tools.calls) do
+            local args = call["function"].arguments
+            table.insert(m.content, {
+              type = "tool_use",
+              id = call.id,
+              name = call["function"].name,
+              input = args ~= "" and vim.json.decode(args) or vim.empty_dict(),
+            })
+          end
+          m.tools = nil
+        end
+
+        -- 8. If reasoning is present, format it as a content block
+        if m.reasoning and type(m.content) == "table" then
+          -- Ref: https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#how-extended-thinking-works
+          table.insert(m.content, 1, {
+            type = "thinking",
+            thinking = m.reasoning.content,
+            signature = m.reasoning._data.signature,
+          })
+        end
+
+        return m
+      end, messages)
+
+      -- 9. Merge consecutive messages with the same role
+      messages = adapter_utils.merge_messages(messages)
+
+      -- 10. Ensure that any consecutive tool results are merged and text messages are included
+      if has_tools then
+        for _, m in ipairs(messages) do
+          if m.role == self.roles.user and m.content and m.content ~= "" then
+            -- Check if content is already an array of blocks
+            if type(m.content) == "table" and m.content.type then
+              -- If it's a single content block (like a tool_result), make it an array
+              m.content = { m.content }
+            end
+
+            -- Now we can iterate over the content blocks
+            if type(m.content) == "table" and vim.islist(m.content) then
+              local consolidated = {}
+              for _, block in ipairs(m.content) do
+                if block.type == "tool_result" then
+                  local prev = consolidated[#consolidated]
+                  if prev and prev.type == "tool_result" and prev.tool_use_id == block.tool_use_id then
+                    -- Merge consecutive tool results with the same tool_use_id
+                    prev.content = prev.content .. block.content
+                  else
+                    table.insert(consolidated, block)
+                  end
+                else
+                  table.insert(consolidated, block)
+                end
+              end
+              m.content = consolidated
+            end
+          end
+        end
+      end
+
+      return { system = system, messages = messages }
+    end,
+
+    ---Form the reasoning output that is stored in the chat buffer
+    ---@param self CodeCompanion.HTTPAdapter
+    ---@param data table The reasoning output from the LLM
+    ---@return nil|{ content: string, _data: table }
+    form_reasoning = function(self, data)
+      local content = vim
+        .iter(data)
+        :map(function(item)
+          return item.content
+        end)
+        :filter(function(content)
+          return content ~= nil
+        end)
+        :join("")
+
+      local signature = data[#data].signature
+
+      return {
+        content = content,
+        _data = {
+          signature = signature,
+        },
+      }
+    end,
+
+    ---Provides the schemas of the tools that are available to the LLM to call
+    ---@param self CodeCompanion.HTTPAdapter
+    ---@param tools table<string, table>
+    ---@return table|nil
+    form_tools = function(self, tools)
+      if not self.opts.tools or not tools then
+        return
+      end
+
+      local transformed = {}
+      for _, tool in pairs(tools) do
+        for _, schema in pairs(tool) do
+          if schema._meta and schema._meta.adapter_tool then
+            if self.available_tools[schema.name] then
+              self.available_tools[schema.name].callback(self, transformed)
+            end
+          else
+            table.insert(transformed, transform.to_anthropic(schema))
+          end
+        end
+      end
+
+      return { tools = transformed }
     end,
     ---Provides the schemas of the tools that are available to the LLM to call
     ---@param self CodeCompanion.HTTPAdapter
