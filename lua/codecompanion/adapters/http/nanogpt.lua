@@ -438,18 +438,163 @@ return {
 
       return { tools = transformed }
     end,
+    ---Output the data from the API ready for insertion into the chat buffer
+    ---@param self CodeCompanion.HTTPAdapter
+    ---@param data table The streamed JSON data from the API, also formatted by the format_data handler
+    ---@param tools? table The table to write any tool output to
+    ---@return table|nil [status: string, output: table]
     chat_output = function(self, data, tools)
-      return openai.handlers.chat_output(self, data, tools)
+      local output = {}
+
+      if self.opts.stream then
+        if type(data) == "string" and string.sub(data, 1, 6) == "event:" then
+          return
+        end
+      end
+
+      if data and data ~= "" then
+        if self.opts.stream then
+          data = adapter_utils.clean_streamed_data(data)
+        else
+          data = data.body
+        end
+
+        local ok, json = pcall(vim.json.decode, data, { luanil = { object = true } })
+
+        if ok then
+          if json.type == "message_start" then
+            output.role = json.message.role
+            output.content = ""
+          elseif json.type == "content_block_start" then
+            if json.content_block.type == "thinking" then
+              output.reasoning = output.reasoning or {}
+              output.reasoning.content = ""
+            end
+            if json.content_block.type == "tool_use" and tools then
+              -- Source: https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview#single-tool-example
+              table.insert(tools, {
+                _index = json.index,
+                id = json.content_block.id,
+                name = json.content_block.name,
+                input = "",
+              })
+            end
+          elseif json.type == "content_block_delta" then
+            if json.delta.type == "thinking_delta" then
+              output.reasoning = output.reasoning or {}
+              output.reasoning.content = json.delta.thinking
+            elseif json.delta.type == "signature_delta" then
+              output.reasoning = output.reasoning or {}
+              output.reasoning.signature = json.delta.signature
+            else
+              output.content = json.delta.text
+              if json.delta.partial_json and tools then
+                for i, tool in ipairs(tools) do
+                  if tool._index == json.index then
+                    tools[i].input = tools[i].input .. json.delta.partial_json
+                    break
+                  end
+                end
+              end
+            end
+          elseif json.type == "message" then
+            output.role = json.role
+
+            for i, content in ipairs(json.content) do
+              if content.type == "text" then
+                output.content = (output.content or "") .. content.text
+              elseif content.type == "thinking" then
+                output.reasoning = output.reasoning and output.reasoning or {}
+                output.reasoning.content = content.text
+              elseif content.type == "tool_use" and tools then
+                table.insert(tools, {
+                  _index = i,
+                  id = content.id,
+                  name = content.name,
+                  -- Encode the input as JSON to match the partial JSON which comes encoded
+                  input = vim.json.encode(content.input),
+                })
+              end
+            end
+          end
+
+          return {
+            status = "success",
+            output = output,
+          }
+        end
+      end
     end,
+    ---Output the data from the API ready for inlining into the current buffer
+    ---@param self CodeCompanion.HTTPAdapter
+    ---@param data table The streamed JSON data from the API, also formatted by the format_data handler
+    ---@param context? table Useful context about the buffer to inline to
+    ---@return table|nil
     inline_output = function(self, data, context)
-      return openai.handlers.inline_output(self, data, context)
+      if self.opts.stream then
+        return log:error("Inline output is not supported for non-streaming models")
+      end
+
+      if data and data ~= "" then
+        local ok, json = pcall(vim.json.decode, data.body, { luanil = { object = true } })
+
+        if not ok then
+          log:error("Error decoding JSON: %s", data.body)
+          return { status = "error", output = json }
+        end
+
+        if ok then
+          if json.type == "message" then
+            if json.content[2] then
+              return { status = "success", output = json.content[2].text }
+            end
+            return { status = "success", output = json.content[1].text }
+          end
+        end
+      end
     end,
     tools = {
+      ---Format the LLM's tool calls for inclusion back in the request
+      ---@param self CodeCompanion.HTTPAdapter
+      ---@param tools table The raw tools collected by chat_output
+      ---@return table|nil
       format_tool_calls = function(self, tools)
-        return openai.handlers.tools.format_tool_calls(self, tools)
+        -- Convert to the OpenAI format
+        local formatted = {}
+        for _, tool in ipairs(tools) do
+          local formatted_tool = {
+            _index = tool._index,
+            id = tool.id,
+            type = "function",
+            ["function"] = {
+              name = tool.name,
+              arguments = tool.input,
+            },
+          }
+          table.insert(formatted, formatted_tool)
+        end
+        return formatted
       end,
+      ---Output the LLM's tool call so we can include it in the messages
+      ---@param self CodeCompanion.HTTPAdapter
+      ---@param tool_call {id: string, function: table, name: string}
+      ---@param output string
+      ---@return table
       output_response = function(self, tool_call, output)
-        return openai.handlers.tools.output_response(self, tool_call, output)
+        return {
+          -- The role should actually be "user" but we set it to "tool" so that
+          -- in the form_messages handler it's easier to identify and merge
+          -- with other user messages.
+          role = "tool",
+          content = output,
+          tools = {
+            type = "tool_result",
+            call_id = tool_call.id,
+            is_error = false,
+          },
+          -- Chat Buffer option: To tell the chat buffer that this shouldn't be visible
+          opts = { visible = false },
+        }
       end,
     },
     on_exit = function(self, data)
