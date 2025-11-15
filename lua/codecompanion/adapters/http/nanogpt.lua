@@ -113,6 +113,66 @@ return {
   headers = {
     ["content-type"] = "application/json",
     ["Authorization"] = "Bearer ${api_key}",
+    ["anthropic-beta"] = "prompt-caching-2024-07-31",
+  },
+  available_tools = {
+    ["code_execution"] = {
+      description = "The code execution tool allows Claude to run Bash commands and manipulate files, including writing code, in a secure, sandboxed environment",
+      ---@param self CodeCompanion.HTTPAdapter.Anthropic
+      ---@param tools table The transformed tools table
+      callback = function(self, tools)
+        self.headers["anthropic-beta"] = (self.headers["anthropic-beta"] .. "," or "") .. "code-execution-2025-08-25"
+
+        table.insert(tools, {
+          type = "code_execution_20250825",
+          name = "code_execution",
+        })
+      end,
+    },
+    ["memory"] = {
+      description = "Enables Claude to store and retrieve information across conversations through a memory file directory. Claude can create, read, update, and delete files that persist between sessions, allowing it to build knowledge over time without keeping everything in the context window",
+      ---@param self CodeCompanion.HTTPAdapter.Anthropic
+      ---@param tools table The transformed tools table
+      callback = function(self, tools)
+        self.headers["anthropic-beta"] = (self.headers["anthropic-beta"] .. "," or "")
+          .. "context-management-2025-06-27"
+
+        table.insert(tools, {
+          type = "memory_20250818",
+          name = "memory",
+        })
+      end,
+      opts = {
+        -- Allow a hybrid tool -> One that also has a client side implementation
+        client_tool = "strategies.chat.tools.memory",
+      },
+    },
+    ["web_fetch"] = {
+      description = "The web fetch tool allows Claude to retrieve full content from specified web pages and PDF documents.",
+      ---@param self CodeCompanion.HTTPAdapter.Anthropic
+      ---@param tools table The transformed tools table
+      callback = function(self, tools)
+        self.headers["anthropic-beta"] = (self.headers["anthropic-beta"] .. "," or "") .. "web-fetch-2025-09-10"
+
+        table.insert(tools, {
+          type = "web_fetch_20250910",
+          name = "web_fetch",
+          max_uses = 5,
+        })
+      end,
+    },
+    ["web_search"] = {
+      description = "The web search tool gives Claude direct access to real-time web content, allowing it to answer questions with up-to-date information beyond its knowledge cutoff",
+      ---@param self CodeCompanion.HTTPAdapter.Anthropic
+      ---@param tools table The transformed tools table
+      callback = function(self, tools)
+        table.insert(tools, {
+          type = "web_search_20250305",
+          name = "web_search",
+          max_uses = 5,
+        })
+      end,
+    },
   },
   handlers = {
     ---@param self CodeCompanion.HTTPAdapter
