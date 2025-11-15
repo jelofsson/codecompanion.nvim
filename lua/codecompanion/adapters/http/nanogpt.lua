@@ -9,6 +9,7 @@ local adapter_utils = require("codecompanion.utils.adapters")
 local config = require("codecompanion.config")
 local log = require("codecompanion.utils.log")
 local openai = require("codecompanion.adapters.http.openai")
+local transform = require("codecompanion.utils.tool_transformers")
 
 local _cache_expires
 local _cache_file = vim.fn.tempname()
@@ -194,8 +195,29 @@ return {
     form_messages = function(self, messages)
       return openai.handlers.form_messages(self, messages)
     end,
+    ---Provides the schemas of the tools that are available to the LLM to call
+    ---@param self CodeCompanion.HTTPAdapter
+    ---@param tools table<string, table>
+    ---@return table|nil
     form_tools = function(self, tools)
-      return openai.handlers.form_tools(self, tools)
+      if not self.opts.tools or not tools then
+        return
+      end
+
+      local transformed = {}
+      for _, tool in pairs(tools) do
+        for _, schema in pairs(tool) do
+          if schema._meta and schema._meta.adapter_tool then
+            if self.available_tools[schema.name] then
+              self.available_tools[schema.name].callback(self, transformed)
+            end
+          else
+            table.insert(transformed, transform.to_anthropic(schema))
+          end
+        end
+      end
+
+      return { tools = transformed }
     end,
     chat_output = function(self, data, tools)
       return openai.handlers.chat_output(self, data, tools)
