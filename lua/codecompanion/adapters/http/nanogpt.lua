@@ -414,29 +414,11 @@ return {
 
       return { tools = transformed }
     end,
-    ---Provides the schemas of the tools that are available to the LLM to call
+    ---Reset accumulated output when starting a new request
     ---@param self CodeCompanion.HTTPAdapter
-    ---@param tools table<string, table>
-    ---@return table|nil
-    form_tools = function(self, tools)
-      if not self.opts.tools or not tools then
-        return
-      end
-
-      local transformed = {}
-      for _, tool in pairs(tools) do
-        for _, schema in pairs(tool) do
-          if schema._meta and schema._meta.adapter_tool then
-            if self.available_tools[schema.name] then
-              self.available_tools[schema.name].callback(self, transformed)
-            end
-          else
-            table.insert(transformed, transform.to_anthropic(schema))
-          end
-        end
-      end
-
-      return { tools = transformed }
+    on_start = function(self)
+      self._accumulated_output = nil
+      return true
     end,
     ---Output the data from the API ready for insertion into the chat buffer
     ---@param self CodeCompanion.HTTPAdapter
@@ -448,64 +430,141 @@ return {
 
       if self.opts.stream then
         if type(data) == "string" and string.sub(data, 1, 6) == "event:" then
-          return
+          -- Parse SSE format
+          local lines = vim.split(data, "\n")
+          for _, line in ipairs(lines) do
+            if string.sub(line, 1, 6) == "event:" then
+              local event = string.match(line, "event:%s*(.+)")
+              if event == "message_stop" then
+                -- Signal stream completion but don't return empty output
+                return {
+                  status = "success",
+                  output = self._accumulated_output or { content = "" },
+                }
+              end
+            elseif string.sub(line, 1, 5) == "data:" then
+              local json_str = string.match(line, "data:%s*(.+)")
+              if json_str and json_str ~= "" then
+                local ok, json = pcall(vim.json.decode, json_str, { luanil = { object = true } })
+                if ok then
+                  -- Initialize accumulated output if not exists
+                  self._accumulated_output = self._accumulated_output or {}
+                  
+                  -- Process the JSON data
+                  if json.type == "message_start" then
+                    self._accumulated_output.role = json.message.role
+                    self._accumulated_output.content = ""
+                  elseif json.type == "content_block_start" then
+                    if json.content_block.type == "tool_use" and tools then
+                      -- Source: https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview#single-tool-example
+                      table.insert(tools, {
+                        _index = json.index,
+                        id = json.content_block.id,
+                        name = json.content_block.name,
+                        input = "",
+                      })
+                    end
+                  elseif json.type == "content_block_delta" then
+                    if json.delta.type == "text_delta" then
+                      self._accumulated_output.content = (self._accumulated_output.content or "") .. json.delta.text
+                      -- Return partial content for real-time display
+                      return {
+                        status = "partial",
+                        output = {
+                          role = self._accumulated_output.role,
+                          content = self._accumulated_output.content,
+                        },
+                      }
+                    elseif json.delta.type == "input_json_delta" and tools then
+                      for i, tool in ipairs(tools) do
+                        if tool._index == json.index then
+                          tools[i].input = tools[i].input .. json.delta.partial_json
+                          break
+                        end
+                      end
+                    end
+                  elseif json.type == "content_block_stop" and tools then
+                    -- Finalize tool input when content block stops
+                    for i, tool in ipairs(tools) do
+                      if tool._index == json.index and tool.input ~= "" then
+                        local ok, parsed_input = pcall(vim.json.decode, tool.input)
+                        if ok then
+                          tool.input = vim.json.encode(parsed_input)
+                        end
+                        break
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end
+          return nil  -- Continue streaming
+        else
+          -- Handle non-event streaming data
+          if data and data ~= "" then
+            data = adapter_utils.clean_streamed_data(data)
+            local ok, json = pcall(vim.json.decode, data, { luanil = { object = true } })
+            
+            if ok then
+              self._accumulated_output = self._accumulated_output or {}
+              
+              if json.type == "content_block_start" and json.content_block.type == "tool_use" and tools then
+                table.insert(tools, {
+                  _index = json.index,
+                  id = json.content_block.id,
+                  name = json.content_block.name,
+                  input = "",
+                })
+              elseif json.type == "content_block_delta" then
+                if json.delta.type == "text_delta" then
+                  self._accumulated_output.content = (self._accumulated_output.content or "") .. json.delta.text
+                  return {
+                    status = "partial",
+                    output = {
+                      role = self._accumulated_output.role or "assistant",
+                      content = self._accumulated_output.content,
+                    },
+                  }
+                elseif json.delta.type == "input_json_delta" and tools then
+                  for i, tool in ipairs(tools) do
+                    if tool._index == json.index then
+                      tools[i].input = tools[i].input .. json.delta.partial_json
+                      break
+                    end
+                  end
+                end
+              elseif json.type == "content_block_stop" and tools then
+                for i, tool in ipairs(tools) do
+                  if tool._index == json.index and tool.input ~= "" then
+                    local ok_parse, parsed_input = pcall(vim.json.decode, tool.input)
+                    if ok_parse then
+                      tool.input = vim.json.encode(parsed_input)
+                    end
+                    break
+                  end
+                end
+              end
+            end
+          end
         end
       end
 
+      -- Handle non-streaming response
       if data and data ~= "" then
-        if self.opts.stream then
-          data = adapter_utils.clean_streamed_data(data)
-        else
+        if not self.opts.stream then
           data = data.body
         end
 
         local ok, json = pcall(vim.json.decode, data, { luanil = { object = true } })
 
         if ok then
-          if json.type == "message_start" then
-            output.role = json.message.role
-            output.content = ""
-          elseif json.type == "content_block_start" then
-            if json.content_block.type == "thinking" then
-              output.reasoning = output.reasoning or {}
-              output.reasoning.content = ""
-            end
-            if json.content_block.type == "tool_use" and tools then
-              -- Source: https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview#single-tool-example
-              table.insert(tools, {
-                _index = json.index,
-                id = json.content_block.id,
-                name = json.content_block.name,
-                input = "",
-              })
-            end
-          elseif json.type == "content_block_delta" then
-            if json.delta.type == "thinking_delta" then
-              output.reasoning = output.reasoning or {}
-              output.reasoning.content = json.delta.thinking
-            elseif json.delta.type == "signature_delta" then
-              output.reasoning = output.reasoning or {}
-              output.reasoning.signature = json.delta.signature
-            else
-              output.content = json.delta.text
-              if json.delta.partial_json and tools then
-                for i, tool in ipairs(tools) do
-                  if tool._index == json.index then
-                    tools[i].input = tools[i].input .. json.delta.partial_json
-                    break
-                  end
-                end
-              end
-            end
-          elseif json.type == "message" then
+          if json.type == "message" then
             output.role = json.role
-
-            for i, content in ipairs(json.content) do
+            output.content = ""
+            for i, content in ipairs(json.content or {}) do
               if content.type == "text" then
                 output.content = (output.content or "") .. content.text
-              elseif content.type == "thinking" then
-                output.reasoning = output.reasoning and output.reasoning or {}
-                output.reasoning.content = content.text
               elseif content.type == "tool_use" and tools then
                 table.insert(tools, {
                   _index = i,
@@ -516,14 +575,19 @@ return {
                 })
               end
             end
+            
+            return {
+              status = "success",
+              output = output,
+            }
           end
-
-          return {
-            status = "success",
-            output = output,
-          }
         end
       end
+    end,
+
+    on_exit = function(self, data)
+      -- Ensure proper cleanup
+      return true
     end,
     ---Output the data from the API ready for inlining into the current buffer
     ---@param self CodeCompanion.HTTPAdapter
@@ -597,9 +661,6 @@ return {
         }
       end,
     },
-    on_exit = function(self, data)
-      return openai.handlers.on_exit(self, data)
-    end,
   },
   schema = {
     ---@type CodeCompanion.Schema
