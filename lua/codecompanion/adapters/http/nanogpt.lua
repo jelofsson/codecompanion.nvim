@@ -418,6 +418,9 @@ return {
     ---@param self CodeCompanion.HTTPAdapter
     on_start = function(self)
       self._accumulated_output = nil
+      -- Use compatible time function
+      local uv = vim.uv or vim.loop
+      self._request_start_time = uv and uv.now() or (os.time() * 1000)
       return true
     end,
     ---Output the data from the API ready for insertion into the chat buffer
@@ -429,6 +432,18 @@ return {
       local output = {}
 
       if self.opts.stream then
+        -- Safety check: if request has been running too long, force completion
+        if self._request_start_time then
+          local uv = vim.uv or vim.loop
+          local current_time = uv and uv.now() or (os.time() * 1000)
+          if (current_time - self._request_start_time) > 30000 then
+            return {
+              status = "success",
+              output = self._accumulated_output or { content = "Request completed." },
+            }
+          end
+        end
+        
         if type(data) == "string" and string.sub(data, 1, 6) == "event:" then
           -- Parse SSE format
           local lines = vim.split(data, "\n")
@@ -441,12 +456,37 @@ return {
                   status = "success",
                   output = self._accumulated_output or { content = "" },
                 }
+              elseif event == "error" then
+                -- Handle streaming errors
+                return {
+                  status = "error",
+                  output = {
+                    role = "assistant",
+                    content = "I encountered a streaming error. Please try your request again.",
+                  },
+                }
               end
             elseif string.sub(line, 1, 5) == "data:" then
               local json_str = string.match(line, "data:%s*(.+)")
               if json_str and json_str ~= "" then
+                -- Check for direct message_stop data
+                if string.match(json_str, '"stop_reason"') then
+                  return {
+                    status = "success",
+                    output = self._accumulated_output or { content = "" },
+                  }
+                end
+                
                 local ok, json = pcall(vim.json.decode, json_str, { luanil = { object = true } })
                 if ok then
+                  -- Check for message_stop in data as well
+                  if json.type == "message_stop" or (json.delta and json.delta.stop_reason) then
+                    return {
+                      status = "success",
+                      output = self._accumulated_output or { content = "" },
+                    }
+                  end
+                  
                   -- Initialize accumulated output if not exists
                   self._accumulated_output = self._accumulated_output or {}
                   
@@ -487,13 +527,19 @@ return {
                     -- Finalize tool input when content block stops
                     for i, tool in ipairs(tools) do
                       if tool._index == json.index and tool.input ~= "" then
-                        local ok, parsed_input = pcall(vim.json.decode, tool.input)
-                        if ok then
+                        local ok_parse, parsed_input = pcall(vim.json.decode, tool.input)
+                        if ok_parse then
                           tool.input = vim.json.encode(parsed_input)
                         end
                         break
                       end
                     end
+                  elseif json.type == "message_delta" and json.delta.stop_reason then
+                    -- Handle message completion with stop reason
+                    return {
+                      status = "success",
+                      output = self._accumulated_output or { content = "" },
+                    }
                   end
                 end
               end
@@ -544,6 +590,12 @@ return {
                     break
                   end
                 end
+              elseif json.type == "message_delta" and json.delta.stop_reason then
+                -- Ensure completion on message delta with stop reason
+                return {
+                  status = "success",
+                  output = self._accumulated_output or { content = "" },
+                }
               end
             end
           end
@@ -580,13 +632,28 @@ return {
               status = "success",
               output = output,
             }
+          elseif json.type == "error" then
+            -- Handle API errors gracefully
+            local error_msg = json.error and json.error.message or "Unknown API error"
+            return {
+              status = "error",
+              output = {
+                role = "assistant",
+                content = "I encountered an error: " .. error_msg .. ". Please try your request again.",
+              },
+            }
           end
         end
       end
     end,
 
     on_exit = function(self, data)
-      -- Ensure proper cleanup
+      -- Ensure proper cleanup and completion signaling
+      if self._accumulated_output then
+        self._accumulated_output = nil
+      end
+      
+      -- Always return true to signal proper completion
       return true
     end,
     ---Output the data from the API ready for inlining into the current buffer
