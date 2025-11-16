@@ -452,10 +452,13 @@ return {
               local event = string.match(line, "event:%s*(.+)")
               if event == "message_stop" then
                 -- Signal stream completion but don't return empty output
-                return {
-                  status = "success",
-                  output = self._accumulated_output or { content = "" },
-                }
+                if not self._content_sent then
+                  self._content_sent = true
+                  return {
+                    status = "success",
+                    output = self._accumulated_output or { content = "" },
+                  }
+                end
               elseif event == "error" then
                 -- Handle streaming errors
                 return {
@@ -506,15 +509,17 @@ return {
                     end
                   elseif json.type == "content_block_delta" then
                     if json.delta.type == "text_delta" then
-                      self._accumulated_output.content = (self._accumulated_output.content or "") .. json.delta.text
-                      -- Return partial content for real-time display
-                      return {
-                        status = "partial",
-                        output = {
-                          role = self._accumulated_output.role,
-                          content = self._accumulated_output.content,
-                        },
-                      }
+                      if not self._content_sent then
+                        self._accumulated_output.content = (self._accumulated_output.content or "") .. json.delta.text
+                        -- Return partial content for real-time display
+                        return {
+                          status = "partial",
+                          output = {
+                            role = self._accumulated_output.role,
+                            content = self._accumulated_output.content,
+                          },
+                        }
+                      end
                     elseif json.delta.type == "input_json_delta" and tools then
                       for i, tool in ipairs(tools) do
                         if tool._index == json.index then
@@ -536,10 +541,13 @@ return {
                     end
                   elseif json.type == "message_delta" and json.delta.stop_reason then
                     -- Handle message completion with stop reason
-                    return {
-                      status = "success",
-                      output = self._accumulated_output or { content = "" },
-                    }
+                    if not self._content_sent then
+                      self._content_sent = true
+                      return {
+                        status = "success",
+                        output = self._accumulated_output or { content = "" },
+                      }
+                    end
                   end
                 end
               end
