@@ -1,5 +1,46 @@
 # Changelog
 
+## [17.33.0](https://github.com/olimorris/codecompanion.nvim/compare/v17.32.0...v17.33.0) (2025-11-24)
+
+
+### Features
+
+* **adapters:** add support for Gemini 3 in Copilot ([#2419](https://github.com/olimorris/codecompanion.nvim/issues/2419)) ([7686e3a](https://github.com/olimorris/codecompanion.nvim/commit/7686e3aa5edfc7ab03487239a9c1fa757e81cc97)), closes [#2413](https://github.com/olimorris/codecompanion.nvim/issues/2413)
+* **adapters:** add support for gemini-3 ([b7dc2b1](https://github.com/olimorris/codecompanion.nvim/commit/b7dc2b19371fa20913b4cc5f7867741b35d3467e))
+* **adapters:** add support for gemini-3 in the gemini adapter ([#2411](https://github.com/olimorris/codecompanion.nvim/issues/2411)) ([b7dc2b1](https://github.com/olimorris/codecompanion.nvim/commit/b7dc2b19371fa20913b4cc5f7867741b35d3467e))
+* **adapters:** copilot can dynamically set max tokens ([#2429](https://github.com/olimorris/codecompanion.nvim/issues/2429)) ([d348080](https://github.com/olimorris/codecompanion.nvim/commit/d348080e39d5f184a83cdd5a549ad6037be4172b))
+* **adapters:** show copilot multipliers and refactor changing adapters ([#2427](https://github.com/olimorris/codecompanion.nvim/issues/2427)) ([e400396](https://github.com/olimorris/codecompanion.nvim/commit/e40039647faf9eba740fa0656dceeb14fb91a725))
+* **adapters:** support extra fields in OpenAI adapter ([#2359](https://github.com/olimorris/codecompanion.nvim/issues/2359)) ([9cc2933](https://github.com/olimorris/codecompanion.nvim/commit/9cc2933a735a238c586c267e07f4992f039c1027))
+* **inline:** add keymap to stop request ([#2426](https://github.com/olimorris/codecompanion.nvim/issues/2426)) ([723ca0e](https://github.com/olimorris/codecompanion.nvim/commit/723ca0eaa13b0e4c87c30c1416f6ff81b87aeae4)), closes [#2420](https://github.com/olimorris/codecompanion.nvim/issues/2420)
+
+
+### Bug Fixes
+
+* **acp:** show urls in tool output ([#2403](https://github.com/olimorris/codecompanion.nvim/issues/2403)) ([32dd2da](https://github.com/olimorris/codecompanion.nvim/commit/32dd2da2bc1b360676c32ef741d8d63052a8edbd))
+* **chat:** preserve prompt library system prompts ([#2433](https://github.com/olimorris/codecompanion.nvim/issues/2433)) ([ccfdc47](https://github.com/olimorris/codecompanion.nvim/commit/ccfdc473c375a926c47923bf251ce9fc0f817843))
+* **chat:** watched buffer diffs should have context id ([#2410](https://github.com/olimorris/codecompanion.nvim/issues/2410)) ([9b38615](https://github.com/olimorris/codecompanion.nvim/commit/9b38615913835c19c82c0296f53cdb1533dc5640))
+* **copilot:** handle "quota exceeded" error ([#2430](https://github.com/olimorris/codecompanion.nvim/issues/2430)) ([d8fbcfe](https://github.com/olimorris/codecompanion.nvim/commit/d8fbcfe21925c2e3a7215fbcb7eb98a7de48fa7c)), closes [#2416](https://github.com/olimorris/codecompanion.nvim/issues/2416)
+
+## [17.32.0](https://github.com/olimorris/codecompanion.nvim/compare/v17.31.0...v17.32.0) (2025-11-18)
+
+
+### Features
+
+* **acp:** add more adapters ([#2394](https://github.com/olimorris/codecompanion.nvim/issues/2394)) ([6dd3236](https://github.com/olimorris/codecompanion.nvim/commit/6dd32360a76dca98e62514be70b42607e6fadac8))
+* **acp:** support all plugin diff providers ([#2311](https://github.com/olimorris/codecompanion.nvim/issues/2311)) ([ee7f44c](https://github.com/olimorris/codecompanion.nvim/commit/ee7f44ca9c2f22a7b82139719856a2f3d68efd49))
+* add background interaction ([#2184](https://github.com/olimorris/codecompanion.nvim/issues/2184)) ([f746584](https://github.com/olimorris/codecompanion.nvim/commit/f7465847dc23c81d2fb3d0d1f366191ed799fae9))
+* **slash_cmd:** add `/compact` ([#2385](https://github.com/olimorris/codecompanion.nvim/issues/2385)) ([dbc54cb](https://github.com/olimorris/codecompanion.nvim/commit/dbc54cb86bc169ab49a510786ef8cc4d10293c3b))
+
+
+### Bug Fixes
+
+* **acp:** better error handling ([#2399](https://github.com/olimorris/codecompanion.nvim/issues/2399)) ([ceaca96](https://github.com/olimorris/codecompanion.nvim/commit/ceaca960b8404f6d9ff758b77c8f1df01557656b))
+* **acp:** prevent auto-close of mini_diff provider ([#2379](https://github.com/olimorris/codecompanion.nvim/issues/2379)) ([a8c696d](https://github.com/olimorris/codecompanion.nvim/commit/a8c696d1fc4268085e4306d54af39b07be884b17))
+* **acp:** protect against msg._meta being nil ([#2366](https://github.com/olimorris/codecompanion.nvim/issues/2366)) ([ca87f13](https://github.com/olimorris/codecompanion.nvim/commit/ca87f13b7559257f5aa91e4fcd1326a61311be13))
+* **adapters:** copilot stats when using free account ([#2388](https://github.com/olimorris/codecompanion.nvim/issues/2388)) ([3d533fa](https://github.com/olimorris/codecompanion.nvim/commit/3d533fa987dc73f39aba02b8f043caf36380f78a))
+* **diff:** clear winhighlight properly when cleanup diff ([#2396](https://github.com/olimorris/codecompanion.nvim/issues/2396)) ([c33f6c0](https://github.com/olimorris/codecompanion.nvim/commit/c33f6c0aa187054806ad7db43978d6bdef91f9e7))
+* **slash_commands:** can load from a module path ([#2370](https://github.com/olimorris/codecompanion.nvim/issues/2370)) ([47e6e1d](https://github.com/olimorris/codecompanion.nvim/commit/47e6e1d24864d2bf8ace8904eff7a41bdf1d3126))
+
 ## [17.31.0](https://github.com/olimorris/codecompanion.nvim/compare/v17.30.0...v17.31.0) (2025-11-07)
 
 

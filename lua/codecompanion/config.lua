@@ -38,9 +38,13 @@ local defaults = {
     },
     acp = {
       auggie_cli = "auggie_cli",
+      cagent = "cagent",
       claude_code = "claude_code",
       codex = "codex",
       gemini_cli = "gemini_cli",
+      goose = "goose",
+      kimi_cli = "kimi_cli",
+      opencode = "opencode",
       opts = {
         show_defaults = true, -- Show default adapters
       },
@@ -331,6 +335,19 @@ If you are providing code changes, use the insert_edit_into_file tool (if availa
             contains_code = true,
             default_params = "watch", -- watch|pin
             provider = providers.pickers, -- telescope|fzf_lua|mini_pick|snacks|default
+          },
+        },
+        ["compact"] = {
+          callback = "strategies.chat.slash_commands.catalog.compact",
+          description = "Clears some of the chat history, keeping a summary in context",
+          enabled = function(opts)
+            if opts.adapter and opts.adapter.type == "http" then
+              return true
+            end
+            return false
+          end,
+          opts = {
+            contains_code = false,
           },
         },
         ["fetch"] = {
@@ -671,6 +688,12 @@ The user is working on a %s machine. Please respond with system specific command
           index = 3,
           callback = "keymaps.always_accept",
           description = "Accept and enable auto mode",
+        },
+        stop = {
+          modes = { n = "q" },
+          index = 4,
+          callback = "keymaps.stop",
+          description = "Stop request",
         },
       },
       variables = {
@@ -1296,9 +1319,9 @@ You must create or modify a workspace file through a series of prompts over mult
         buffer_watch = "󰂥 ",
         --chat_context = " ",
         chat_fold = " ",
-        tool_pending = " ",
-        tool_in_progress = " ",
-        tool_failure = " ",
+        tool_pending = "  ",
+        tool_in_progress = "  ",
+        tool_failure = "  ",
         tool_success = "  ",
       },
       -- Window options for the chat buffer
