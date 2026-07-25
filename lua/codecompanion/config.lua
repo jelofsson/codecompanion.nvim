@@ -23,6 +23,7 @@ local defaults = {
       kimi = "kimi",
       novita = "novita",
       mistral = "mistral",
+      nanogpt = "nanogpt",
       ollama = "ollama",
       openai = "openai",
       openai_responses = "openai_responses",
